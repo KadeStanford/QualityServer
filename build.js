@@ -48,7 +48,7 @@ const manifest = {
     { path: '/*', target: { kind: 'Compute', src: 'default' } }
   ],
   computeResources: [
-    { name: 'default', runtime: 'nodejs18.x', entrypoint: 'index.js' }
+    { name: 'default', runtime: 'nodejs20.x', entrypoint: 'index.js' }
   ],
   framework: { name: 'express', version: '4.x' }
 };
