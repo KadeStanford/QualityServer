@@ -18,9 +18,17 @@ function dynamo() {
   if (!_docClient) {
     const { DynamoDBClient }         = require('@aws-sdk/client-dynamodb');
     const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
-    _docClient = DynamoDBDocumentClient.from(
-      new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
-    );
+
+    // Amplify WEB_COMPUTE doesn't inject IAM role credentials into the
+    // runtime.  Use explicit credentials via DYNAMO_* env vars instead.
+    const clientOpts = { region: process.env.DYNAMO_REGION || process.env.AWS_REGION || 'us-east-1' };
+    if (process.env.DYNAMO_ACCESS_KEY && process.env.DYNAMO_SECRET_KEY) {
+      clientOpts.credentials = {
+        accessKeyId:     process.env.DYNAMO_ACCESS_KEY,
+        secretAccessKey: process.env.DYNAMO_SECRET_KEY
+      };
+    }
+    _docClient = DynamoDBDocumentClient.from(new DynamoDBClient(clientOpts));
   }
   return _docClient;
 }
