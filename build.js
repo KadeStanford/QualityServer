@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // ─── Amplify WEB_COMPUTE build script ──────────────────────────────
-// Phase 1: MINIMAL — raw Lambda handler, zero dependencies
-// Once this returns 200 from Amplify we add Express back.
+// Amplify WEB_COMPUTE expects the entrypoint to be a Node.js HTTP
+// server (not a Lambda handler). Our Express app in src/index.js
+// already calls app.listen() when require.main === module.
+// We make the entrypoint start the Express app directly.
 // ────────────────────────────────────────────────────────────────────
 
 const fs   = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const BASE    = '.amplify-hosting';
 const COMPUTE = path.join(BASE, 'compute', 'default');
@@ -18,29 +21,23 @@ if (fs.existsSync(BASE)) fs.rmSync(BASE, { recursive: true });
 fs.mkdirSync(COMPUTE, { recursive: true });
 fs.mkdirSync(STATIC,  { recursive: true });
 
-// ─── Ultra-minimal Lambda handler — zero requires ──────────────────
-const handler = `
-const http = require('http');
+// ─── Copy application code ─────────────────────────────────────────
+copyDir('src', path.join(COMPUTE, 'src'));
+fs.copyFileSync('package.json',      path.join(COMPUTE, 'package.json'));
+fs.copyFileSync('package-lock.json', path.join(COMPUTE, 'package-lock.json'));
 
-const server = http.createServer((req, res) => {
-  console.log('Request:', req.method, req.url);
-  
-  res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    message: 'QualityServer is alive',
-    path: req.url,
-    method: req.method,
-    timestamp: new Date().toISOString()
-  }));
-});
+// ─── Install production deps inside compute dir ────────────────────
+console.log('Installing production dependencies…');
+execSync('npm ci --omit=dev', { cwd: path.resolve(COMPUTE), stdio: 'inherit' });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log('QualityServer listening on port ' + PORT);
-});
+// ─── Create entrypoint that starts the Express server ──────────────
+const entrypoint = `
+// Amplify WEB_COMPUTE entrypoint — starts our Express server
+// Amplify proxies CloudFront requests to this HTTP server
+require('./src/index');
 `.trimStart();
 
-fs.writeFileSync(path.join(COMPUTE, 'index.js'), handler);
+fs.writeFileSync(path.join(COMPUTE, 'index.js'), entrypoint);
 
 // ─── Deploy manifest ──────────────────────────────────────────────
 const manifest = {
@@ -60,5 +57,14 @@ fs.writeFileSync(
 );
 
 console.log('Build complete → .amplify-hosting/');
-console.log('Handler:', path.join(COMPUTE, 'index.js'));
-console.log('Manifest:', path.join(BASE, 'deploy-manifest.json'));
+
+// ─── Helper ────────────────────────────────────────────────────────
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}

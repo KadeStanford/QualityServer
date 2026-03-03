@@ -108,17 +108,13 @@ app.use((err, _req, res, _next) => {
 // ─── Init data dir ─────────────────────────────────────────────────
 try { ensureDataDir(); } catch (e) { log(`ensureDataDir warning: ${e.message}`); }
 
-// ─── Start (local) or export (Lambda) ──────────────────────────────
-// require.main === module means this file was run directly (node src/index.js)
-// When required by the Lambda handler (require('./src/index')), it won't match
-if (require.main === module) {
-  app.listen(PORT, () => {
-    log(`QualityServer running on port ${PORT}`);
-    log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    log(`CORS origins: ${allowedOrigins.join(', ')}`);
-    log(`Auth: ${process.env.API_KEY ? 'API key required' : 'OPEN (no API_KEY set)'}`);
-  });
-}
+// ─── Start server ──────────────────────────────────────────────────
+app.listen(PORT, () => {
+  log(`QualityServer running on port ${PORT}`);
+  log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  log(`CORS origins: ${allowedOrigins.join(', ')}`);
+  log(`Auth: ${process.env.API_KEY ? 'API key required' : 'OPEN (no API_KEY set)'}`);
+});
 
-// Export for serverless-http wrapper (Lambda handler)
+// Export for testing
 module.exports = app;
