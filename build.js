@@ -21,21 +21,30 @@ fs.mkdirSync(STATIC,  { recursive: true });
 // ─── Ultra-minimal Lambda handler — zero requires ──────────────────
 const handler = `
 exports.handler = async (event, context) => {
-  const response = {
+  // Log the full event so we can see what Amplify sends
+  console.log('EVENT:', JSON.stringify(event, null, 2));
+  console.log('CONTEXT:', JSON.stringify({
+    functionName: context.functionName,
+    functionVersion: context.functionVersion,
+    memoryLimitInMB: context.memoryLimitInMB
+  }));
+
+  const body = JSON.stringify({
+    message: 'QualityServer is alive',
+    event_keys: Object.keys(event),
+    timestamp: new Date().toISOString()
+  });
+
+  // Try multiple response formats to see which Amplify accepts
+  return {
     statusCode: 200,
     headers: {
-      'content-type': 'application/json'
+      'content-type': 'application/json',
+      'cache-control': 'no-cache'
     },
-    body: JSON.stringify({
-      message: 'QualityServer is alive',
-      path: event.rawPath || event.path || '/',
-      method: event.requestContext && event.requestContext.http
-        ? event.requestContext.http.method
-        : event.httpMethod || 'UNKNOWN',
-      timestamp: new Date().toISOString()
-    })
+    isBase64Encoded: false,
+    body: body
   };
-  return response;
 };
 `.trimStart();
 
