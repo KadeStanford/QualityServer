@@ -34,21 +34,19 @@ execSync('npm ci --omit=dev', { cwd: path.resolve(COMPUTE), stdio: 'inherit' });
 // ─── Create Lambda entry point ─────────────────────────────────────
 const handler = `
 const serverless = require('serverless-http');
-let app;
+let wrapped;
 try {
-  app = require('./src/index');
+  const app = require('./src/index');
+  wrapped = serverless(app);
 } catch (err) {
   console.error('FATAL: Failed to load app:', err);
-  // Return a minimal handler so we get an error message instead of blank 500
-  module.exports.handler = async () => ({
+  wrapped = async () => ({
     statusCode: 500,
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ error: 'App failed to load', detail: err.message })
+    body: JSON.stringify({ error: 'App failed to load', detail: err.message, stack: err.stack })
   });
-  return;
 }
 
-const wrapped = serverless(app);
 module.exports.handler = async (event, context) => {
   try {
     return await wrapped(event, context);
