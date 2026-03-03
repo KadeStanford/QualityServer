@@ -16,6 +16,85 @@ const { log } = require('../lib/logger');
 
 const router = express.Router();
 
+// ─── Forward URL (Inspectionapp at the shop) ────────────────────────
+const FORWARD_URL = process.env.FORWARD_URL || '';   // e.g. https://api.autoflopro.com
+
+// ─── Forward a job to the shop's Inspectionapp server ───────────────
+// Fire-and-forget — if it fails we still have the local copy.
+async function forwardToShopServer(job) {
+  if (!FORWARD_URL) return null;
+  try {
+    const payload = {
+      templateName: job.templateName,
+      printer:      job.printer,
+      copies:       job.copies,
+      pdfData:      job.pdfData,
+      labelData:    job.labelData,
+      paperSize:    job.paperSize,
+      locationId:   job.locationId
+    };
+    const resp = await fetch(`${FORWARD_URL}/api/print/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      log(`Forward failed (${resp.status}): ${await resp.text()}`, 'error');
+      return null;
+    }
+    const data = await resp.json();
+    log(`Forwarded job → shop server, remote id: ${data.id}`);
+    return data.id;   // the Inspectionapp job id
+  } catch (err) {
+    log(`Forward error: ${err.message}`, 'error');
+    return null;
+  }
+}
+
+// ─── Sync status of forwarded jobs from shop server ─────────────────
+async function syncRemoteStatuses() {
+  if (!FORWARD_URL) return;
+  try {
+    const jobs = await read('jobs');
+    // Only sync jobs that were forwarded and aren't terminal
+    const pending = jobs.filter(j => j.remoteId && !['completed', 'failed'].includes(j.status));
+    if (pending.length === 0) return;
+
+    const resp = await fetch(`${FORWARD_URL}/api/print/jobs`);
+    if (!resp.ok) return;
+    const remoteJobs = await resp.json();
+
+    const remoteMap = new Map(remoteJobs.map(rj => [rj.id, rj]));
+    let changed = false;
+
+    for (const local of pending) {
+      const remote = remoteMap.get(local.remoteId);
+      if (!remote) continue;
+      if (remote.status !== local.status) {
+        log(`Sync: job ${local.id} ${local.status} → ${remote.status}`);
+        local.status      = remote.status;
+        local.claimedBy   = remote.claimedBy   || local.claimedBy;
+        local.claimedAt   = remote.claimedAt   || local.claimedAt;
+        local.completedAt = remote.completedAt || local.completedAt;
+        local.failedAt    = remote.failedAt    || local.failedAt;
+        local.errorMessage = remote.errorMessage || local.errorMessage;
+        if (remote.status === 'completed') local.pdfData = null; // free memory
+        changed = true;
+      }
+    }
+
+    if (changed) await write('jobs', jobs);
+  } catch (err) {
+    log(`Sync error: ${err.message}`, 'error');
+  }
+}
+
+// Run sync every 30 seconds
+if (FORWARD_URL) {
+  setInterval(syncRemoteStatuses, 30_000);
+  log(`Job forwarding enabled → ${FORWARD_URL}`);
+}
+
 // ─── Create job ─────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {
@@ -44,12 +123,26 @@ router.post('/', async (req, res) => {
     completedAt: null,
     failedAt: null,
     errorMessage: null,
-    retryCount: 0
+    retryCount: 0,
+    remoteId: null                 // filled if forwarded to shop server
   };
 
   const jobs = await read('jobs');
   jobs.push(job);
   await write('jobs', jobs);
+
+  // Forward to shop server (fire-and-forget — don't block the response)
+  forwardToShopServer(job).then(async (remoteId) => {
+    if (remoteId) {
+      job.remoteId = remoteId;
+      const freshJobs = await read('jobs');
+      const target = freshJobs.find(j => j.id === job.id);
+      if (target) {
+        target.remoteId = remoteId;
+        await write('jobs', freshJobs);
+      }
+    }
+  }).catch(() => {});
 
   log(`Print job created: ${job.id} — ${job.templateName} → ${job.printer || 'any'}`);
   res.status(201).json({ id: job.id, status: 'pending', message: 'Print job queued' });
