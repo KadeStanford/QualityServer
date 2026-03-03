@@ -50,7 +50,7 @@ const manifest = {
   computeResources: [
     { name: 'default', runtime: 'nodejs20.x', entrypoint: 'index.js' }
   ],
-  framework: { name: 'express', version: '4.x' }
+  framework: { name: 'express', version: '4.21.0' }
 };
 
 fs.writeFileSync(
