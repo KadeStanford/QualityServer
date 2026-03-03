@@ -15,9 +15,9 @@ const clientRoutes       = require('./routes/clients');
 const { log }            = require('./lib/logger');
 const { ensureDataDir }  = require('./lib/store');
 
-// ─── Load .env for local dev only (Lambda gets env vars natively) ──
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  const envPath = path.join(__dirname, '..', '.env');
+// ─── Load .env for local dev only ──────────────────────────────────
+const envPath = path.join(__dirname, '..', '.env');
+try {
   if (fs.existsSync(envPath)) {
     fs.readFileSync(envPath, 'utf8')
       .split('\n')
@@ -27,7 +27,7 @@ if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
         if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
       });
   }
-}
+} catch (e) { /* ignore missing .env */ }
 
 const app  = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -105,10 +105,13 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message });
 });
 
-// ─── Start (local) or export (Lambda) ──────────────────────────────
-ensureDataDir();
+// ─── Init data dir ─────────────────────────────────────────────────
+try { ensureDataDir(); } catch (e) { log(`ensureDataDir warning: ${e.message}`); }
 
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+// ─── Start (local) or export (Lambda) ──────────────────────────────
+// require.main === module means this file was run directly (node src/index.js)
+// When required by the Lambda handler (require('./src/index')), it won't match
+if (require.main === module) {
   app.listen(PORT, () => {
     log(`QualityServer running on port ${PORT}`);
     log(`Environment: ${process.env.NODE_ENV || 'development'}`);
