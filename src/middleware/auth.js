@@ -10,9 +10,19 @@ function authMiddleware(req, res, next) {
   // No key configured → open access (dev mode)
   if (!apiKey) return next();
 
-  const provided = req.headers['x-api-key'];
+  // Accept X-API-Key header
+  let provided = req.headers['x-api-key'];
+
+  // Also accept Authorization: Bearer <api-key> (Print Client compat)
   if (!provided) {
-    return res.status(401).json({ error: 'Missing X-API-Key header' });
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      provided = authHeader.slice(7);
+    }
+  }
+
+  if (!provided) {
+    return res.status(401).json({ error: 'Missing X-API-Key or Authorization header' });
   }
   if (provided !== apiKey) {
     return res.status(403).json({ error: 'Invalid API key' });

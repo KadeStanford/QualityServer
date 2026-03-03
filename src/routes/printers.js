@@ -57,17 +57,18 @@ router.post('/', async (req, res) => {
 // ─── Bulk-update statuses ───────────────────────────────────────────
 
 router.put('/status', async (req, res) => {
-  const { clientId, statuses } = req.body;
+  const { clientId, statuses, printerStatuses } = req.body;
+  const statusList = statuses || printerStatuses;
 
-  if (!clientId || !Array.isArray(statuses)) {
+  if (!clientId || !Array.isArray(statusList)) {
     return res.status(400).json({ error: 'clientId and statuses[] required' });
   }
 
   const db = await read('printers');
   let updated = 0;
 
-  for (const s of statuses) {
-    const printer = db.find(p => p.systemName === s.systemName && p.clientId === clientId);
+  for (const s of statusList) {
+    const printer = db.find(p => (p.systemName === (s.systemName || s.name) || p.name === s.name) && p.clientId === clientId);
     if (printer) {
       printer.status = s.status;
       printer.lastSeen = new Date().toISOString();
