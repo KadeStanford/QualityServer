@@ -13,7 +13,7 @@ function authMiddleware(req, res, next) {
   // Accept X-API-Key header
   let provided = req.headers['x-api-key'];
 
-  // Also accept Authorization: Bearer <api-key> (Print Client compat)
+  // Also accept Authorization: Bearer <token> (Print Client compat)
   if (!provided) {
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -24,7 +24,13 @@ function authMiddleware(req, res, next) {
   if (!provided) {
     return res.status(401).json({ error: 'Missing X-API-Key or Authorization header' });
   }
-  if (provided !== apiKey) {
+
+  // Accept the primary API key OR the Print Client's existing JWT token
+  const printClientToken = process.env.PRINT_CLIENT_TOKEN;
+  const validTokens = [apiKey];
+  if (printClientToken) validTokens.push(printClientToken);
+
+  if (!validTokens.includes(provided)) {
     return res.status(403).json({ error: 'Invalid API key' });
   }
   next();
