@@ -28,10 +28,14 @@ function dynamo() {
 function table() { return process.env.DYNAMODB_TABLE; }
 
 // ═══════════════════════════════════════════════════════════════════
-//  JSON-file backend  (local dev)
+//  JSON-file backend  (local dev, or Lambda /tmp fallback)
 // ═══════════════════════════════════════════════════════════════════
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// Lambda filesystem is read-only except /tmp — use that when in Lambda
+const IS_LAMBDA = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+const DATA_DIR = IS_LAMBDA
+  ? path.join('/tmp', 'data')
+  : path.join(__dirname, '..', '..', 'data');
 const FILES = {
   jobs:     path.join(DATA_DIR, 'print-jobs.json'),
   printers: path.join(DATA_DIR, 'printers.json'),
