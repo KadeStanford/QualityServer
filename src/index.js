@@ -1,5 +1,6 @@
 // ─── QualityServer  ──  src/index.js ────────────────────────────────
 // Standalone print-job API.  Dashboard POSTs jobs, print client polls.
+// Runs as Express locally OR as AWS Lambda via serverless-http.
 // ────────────────────────────────────────────────────────────────────
 
 const express = require('express');
@@ -14,16 +15,18 @@ const clientRoutes       = require('./routes/clients');
 const { log }            = require('./lib/logger');
 const { ensureDataDir }  = require('./lib/store');
 
-// ─── Load .env (zero-dep, just read the file) ─────────────────────
-const envPath = path.join(__dirname, '..', '.env');
-if (fs.existsSync(envPath)) {
-  fs.readFileSync(envPath, 'utf8')
-    .split('\n')
-    .filter(l => l.trim() && !l.startsWith('#'))
-    .forEach(l => {
-      const [key, ...rest] = l.split('=');
-      if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
-    });
+// ─── Load .env for local dev only (Lambda gets env vars natively) ──
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  const envPath = path.join(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, 'utf8')
+      .split('\n')
+      .filter(l => l.trim() && !l.startsWith('#'))
+      .forEach(l => {
+        const [key, ...rest] = l.split('=');
+        if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
+      });
+  }
 }
 
 const app  = express();
@@ -102,11 +105,17 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message });
 });
 
-// ─── Start ─────────────────────────────────────────────────────────
+// ─── Start (local) or export (Lambda) ──────────────────────────────
 ensureDataDir();
-app.listen(PORT, () => {
-  log(`QualityServer running on port ${PORT}`);
-  log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  log(`CORS origins: ${allowedOrigins.join(', ')}`);
-  log(`Auth: ${process.env.API_KEY ? 'API key required' : 'OPEN (no API_KEY set)'}`);
-});
+
+if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  app.listen(PORT, () => {
+    log(`QualityServer running on port ${PORT}`);
+    log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    log(`CORS origins: ${allowedOrigins.join(', ')}`);
+    log(`Auth: ${process.env.API_KEY ? 'API key required' : 'OPEN (no API_KEY set)'}`);
+  });
+}
+
+// Export for serverless-http wrapper (Lambda handler)
+module.exports = app;

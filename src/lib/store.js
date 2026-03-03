@@ -1,50 +1,96 @@
-// ─── JSON file store ────────────────────────────────────────────────
-// Dead-simple persistence: one JSON file per collection in data/.
-// Good enough for a label print queue — no database needed.
+// ─── Data store — auto-selects backend ──────────────────────────────
+// If DYNAMODB_TABLE env var is set → DynamoDB (Lambda / Amplify).
+// Otherwise → JSON files in data/ (local dev).
 // ────────────────────────────────────────────────────────────────────
 
 const fs   = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const USE_DYNAMO = !!process.env.DYNAMODB_TABLE;
 
+// ═══════════════════════════════════════════════════════════════════
+//  DynamoDB backend  (one row per collection, data stored as list)
+// ═══════════════════════════════════════════════════════════════════
+
+let _docClient = null;
+
+function dynamo() {
+  if (!_docClient) {
+    const { DynamoDBClient }         = require('@aws-sdk/client-dynamodb');
+    const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
+    _docClient = DynamoDBDocumentClient.from(
+      new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+    );
+  }
+  return _docClient;
+}
+
+function table() { return process.env.DYNAMODB_TABLE; }
+
+// ═══════════════════════════════════════════════════════════════════
+//  JSON-file backend  (local dev)
+// ═══════════════════════════════════════════════════════════════════
+
+const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const FILES = {
   jobs:     path.join(DATA_DIR, 'print-jobs.json'),
   printers: path.join(DATA_DIR, 'printers.json'),
   clients:  path.join(DATA_DIR, 'clients.json')
 };
 
-// ─── Init ───────────────────────────────────────────────────────────
+// ─── Init (only touches disk when using file backend) ──────────────
 
 function ensureDataDir() {
+  if (USE_DYNAMO) return;                        // DynamoDB: nothing to init
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   for (const [, filePath] of Object.entries(FILES)) {
-    if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, '[]');
+    if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, '[]');
+  }
+}
+
+// ─── Read ──────────────────────────────────────────────────────────
+
+async function read(collection) {
+  if (USE_DYNAMO) {
+    const { GetCommand } = require('@aws-sdk/lib-dynamodb');
+    try {
+      const res = await dynamo().send(new GetCommand({
+        TableName: table(),
+        Key: { pk: collection }
+      }));
+      return res.Item ? res.Item.data : [];
+    } catch (err) {
+      console.error(`DynamoDB read(${collection}):`, err.message);
+      return [];
     }
   }
+
+  // File fallback
+  try { return JSON.parse(fs.readFileSync(FILES[collection], 'utf8')); }
+  catch { return []; }
 }
 
-// ─── Read / Write ───────────────────────────────────────────────────
+// ─── Write ─────────────────────────────────────────────────────────
 
-function read(collection) {
-  try {
-    return JSON.parse(fs.readFileSync(FILES[collection], 'utf8'));
-  } catch {
-    return [];
+async function write(collection, data) {
+  if (USE_DYNAMO) {
+    const { PutCommand } = require('@aws-sdk/lib-dynamodb');
+    await dynamo().send(new PutCommand({
+      TableName: table(),
+      Item: { pk: collection, data }
+    }));
+    return;
   }
-}
 
-function write(collection, data) {
   fs.writeFileSync(FILES[collection], JSON.stringify(data, null, 2));
 }
 
-// ─── Stats ──────────────────────────────────────────────────────────
+// ─── Stats ─────────────────────────────────────────────────────────
 
 async function getStats() {
-  const jobs     = read('jobs');
-  const printers = read('printers');
-  const clients  = read('clients');
+  const jobs     = await read('jobs');
+  const printers = await read('printers');
+  const clients  = await read('clients');
 
   const pending   = jobs.filter(j => j.status === 'pending').length;
   const printing  = jobs.filter(j => j.status === 'printing').length;

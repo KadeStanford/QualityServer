@@ -11,12 +11,12 @@ const router = express.Router();
 
 // ─── Register or heartbeat ──────────────────────────────────────────
 
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { clientId, name, description } = req.body;
 
   if (!clientId) return res.status(400).json({ error: 'clientId is required' });
 
-  const clients = read('clients');
+  const clients = await read('clients');
   const idx = clients.findIndex(c => c.clientId === clientId);
 
   const record = {
@@ -30,15 +30,15 @@ router.post('/register', (req, res) => {
   if (idx >= 0) clients[idx] = { ...clients[idx], ...record };
   else clients.push(record);
 
-  write('clients', clients);
+  await write('clients', clients);
   log(`Print client registered: ${record.name}`);
   res.json({ message: 'Client registered', client: record });
 });
 
 // ─── List clients ───────────────────────────────────────────────────
 
-router.get('/', (_req, res) => {
-  res.json(read('clients'));
+router.get('/', async (_req, res) => {
+  res.json(await read('clients'));
 });
 
 module.exports = router;

@@ -18,7 +18,7 @@ const router = express.Router();
 
 // ─── Create job ─────────────────────────────────────────────────────
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { templateName, printer, printerId, copies, pdfData, labelData, paperSize } = req.body;
 
   if (!pdfData) {
@@ -44,9 +44,9 @@ router.post('/', (req, res) => {
     retryCount: 0
   };
 
-  const jobs = read('jobs');
+  const jobs = await read('jobs');
   jobs.push(job);
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   log(`Print job created: ${job.id} — ${job.templateName} → ${job.printer || 'any'}`);
   res.status(201).json({ id: job.id, status: 'pending', message: 'Print job queued' });
@@ -54,9 +54,9 @@ router.post('/', (req, res) => {
 
 // ─── List all jobs (summary, no pdfData) ────────────────────────────
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { status, limit } = req.query;
-  let jobs = read('jobs');
+  let jobs = await read('jobs');
 
   if (status) jobs = jobs.filter(j => j.status === status);
 
@@ -71,9 +71,9 @@ router.get('/', (req, res) => {
 
 // ─── Poll pending jobs (print client calls this) ───────────────────
 
-router.get('/pending', (req, res) => {
+router.get('/pending', async (req, res) => {
   const { limit } = req.query;
-  let jobs = read('jobs').filter(j => j.status === 'pending');
+  let jobs = (await read('jobs')).filter(j => j.status === 'pending');
 
   // Oldest first so they print in order
   jobs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
@@ -84,10 +84,10 @@ router.get('/pending', (req, res) => {
 
 // ─── Claim a job ────────────────────────────────────────────────────
 
-router.post('/:id/claim', (req, res) => {
+router.post('/:id/claim', async (req, res) => {
   const { id } = req.params;
   const { clientId } = req.body;
-  const jobs = read('jobs');
+  const jobs = await read('jobs');
   const job = jobs.find(j => j.id === id);
 
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -98,7 +98,7 @@ router.post('/:id/claim', (req, res) => {
   job.status = 'printing';
   job.claimedBy = clientId || 'unknown';
   job.claimedAt = new Date().toISOString();
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   log(`Job ${id} claimed by ${clientId || 'unknown'}`);
   res.json({ message: 'Job claimed', job });
@@ -106,10 +106,10 @@ router.post('/:id/claim', (req, res) => {
 
 // ─── Complete a job ─────────────────────────────────────────────────
 
-router.post('/:id/complete', (req, res) => {
+router.post('/:id/complete', async (req, res) => {
   const { id } = req.params;
   const { clientId, printDetails } = req.body;
-  const jobs = read('jobs');
+  const jobs = await read('jobs');
   const job = jobs.find(j => j.id === id);
 
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -118,7 +118,7 @@ router.post('/:id/complete', (req, res) => {
   job.completedAt = new Date().toISOString();
   job.printDetails = printDetails || {};
   job.pdfData = null;  // free memory
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   log(`Job ${id} completed by ${clientId || 'unknown'}`);
   res.json({ message: 'Job completed' });
@@ -126,10 +126,10 @@ router.post('/:id/complete', (req, res) => {
 
 // ─── Fail a job (auto-retry up to 3x) ──────────────────────────────
 
-router.post('/:id/fail', (req, res) => {
+router.post('/:id/fail', async (req, res) => {
   const { id } = req.params;
   const { clientId, errorMessage, shouldRetry } = req.body;
-  const jobs = read('jobs');
+  const jobs = await read('jobs');
   const job = jobs.find(j => j.id === id);
 
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -146,7 +146,7 @@ router.post('/:id/fail', (req, res) => {
     job.failedAt = new Date().toISOString();
   }
   job.errorMessage = errorMessage || 'Unknown error';
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   log(`Job ${id} failed${willRetry ? ' — will retry' : ' — permanent'}`);
   res.json({ message: willRetry ? 'Job will be retried' : 'Job failed permanently', willRetry });
@@ -154,12 +154,12 @@ router.post('/:id/fail', (req, res) => {
 
 // ─── Delete a single job ────────────────────────────────────────────
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  let jobs = read('jobs');
+  let jobs = await read('jobs');
   const before = jobs.length;
   jobs = jobs.filter(j => j.id !== id);
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   if (jobs.length === before) return res.status(404).json({ error: 'Job not found' });
   res.json({ message: 'Job deleted' });
@@ -167,11 +167,11 @@ router.delete('/:id', (req, res) => {
 
 // ─── Clear completed/failed jobs ────────────────────────────────────
 
-router.delete('/clear', (_req, res) => {
-  let jobs = read('jobs');
+router.delete('/clear', async (_req, res) => {
+  let jobs = await read('jobs');
   const before = jobs.length;
   jobs = jobs.filter(j => j.status === 'pending' || j.status === 'printing');
-  write('jobs', jobs);
+  await write('jobs', jobs);
 
   res.json({ message: `Cleared ${before - jobs.length} jobs` });
 });

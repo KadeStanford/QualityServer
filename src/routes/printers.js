@@ -14,20 +14,20 @@ const router = express.Router();
 
 // ─── List printers ──────────────────────────────────────────────────
 
-router.get('/', (_req, res) => {
-  res.json(read('printers'));
+router.get('/', async (_req, res) => {
+  res.json(await read('printers'));
 });
 
 // ─── Register printers (from print client) ──────────────────────────
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { clientId, printers } = req.body;
 
   if (!clientId || !Array.isArray(printers)) {
     return res.status(400).json({ error: 'clientId and printers[] required' });
   }
 
-  const db = read('printers');
+  const db = await read('printers');
 
   for (const p of printers) {
     const idx = db.findIndex(
@@ -49,21 +49,21 @@ router.post('/', (req, res) => {
     else db.push(record);
   }
 
-  write('printers', db);
+  await write('printers', db);
   log(`${printers.length} printer(s) registered from client ${clientId}`);
   res.json({ message: `${printers.length} printer(s) registered` });
 });
 
 // ─── Bulk-update statuses ───────────────────────────────────────────
 
-router.put('/status', (req, res) => {
+router.put('/status', async (req, res) => {
   const { clientId, statuses } = req.body;
 
   if (!clientId || !Array.isArray(statuses)) {
     return res.status(400).json({ error: 'clientId and statuses[] required' });
   }
 
-  const db = read('printers');
+  const db = await read('printers');
   let updated = 0;
 
   for (const s of statuses) {
@@ -75,15 +75,15 @@ router.put('/status', (req, res) => {
     }
   }
 
-  write('printers', db);
+  await write('printers', db);
   res.json({ message: `Updated ${updated} printer statuses` });
 });
 
 // ─── Clear all printers ─────────────────────────────────────────────
 
-router.delete('/', (_req, res) => {
-  const db = read('printers');
-  write('printers', []);
+router.delete('/', async (_req, res) => {
+  const db = await read('printers');
+  await write('printers', []);
   log(`Cleared ${db.length} printers`);
   res.json({ message: `Cleared ${db.length} printers` });
 });
