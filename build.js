@@ -31,9 +31,19 @@ console.log('Installing production dependencies…');
 execSync('npm ci --omit=dev', { cwd: path.resolve(COMPUTE), stdio: 'inherit' });
 
 // ─── Create entrypoint that starts the Express server ──────────────
+// Amplify WEB_COMPUTE injects env vars during BUILD but not into
+// the compute runtime.  We bake the relevant ones into the entrypoint.
+const envVars = ['NODE_ENV', 'API_KEY', 'ALLOWED_ORIGINS'];
+const envLines = envVars
+  .filter(k => process.env[k])
+  .map(k => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(process.env[k])};`)
+  .join('\n');
+
 const entrypoint = `
 // Amplify WEB_COMPUTE entrypoint — starts our Express server
-// Amplify proxies CloudFront requests to this HTTP server
+// Env vars baked in at build time (Amplify doesn't inject them at runtime)
+${envLines}
+
 require('./src/index');
 `.trimStart();
 
