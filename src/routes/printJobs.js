@@ -19,7 +19,7 @@ const router = express.Router();
 // ─── Create job ─────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {
-  const { templateName, printer, printerId, copies, pdfData, labelData, paperSize } = req.body;
+  const { templateName, printer, printerName, printerId, copies, pdfData, labelData, paperSize } = req.body;
 
   if (!pdfData) {
     return res.status(400).json({ error: 'pdfData (base64 PDF) is required' });
@@ -28,7 +28,7 @@ router.post('/', async (req, res) => {
   const job = {
     id: uuidv4(),
     templateName: templateName || 'Unnamed',
-    printer: printer || null,
+    printer: printer || printerName || null,
     printerId: printerId || null,
     copies: copies || 1,
     pdfData,
