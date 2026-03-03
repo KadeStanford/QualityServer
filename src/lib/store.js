@@ -79,13 +79,19 @@ async function read(collection) {
 async function write(collection, data) {
   if (USE_DYNAMO) {
     const { PutCommand } = require('@aws-sdk/lib-dynamodb');
-    await dynamo().send(new PutCommand({
-      TableName: table(),
-      Item: { pk: collection, data }
-    }));
-    return;
+    try {
+      await dynamo().send(new PutCommand({
+        TableName: table(),
+        Item: { pk: collection, data }
+      }));
+      return;
+    } catch (err) {
+      console.error(`DynamoDB write(${collection}):`, err.message);
+      // Fall through to file backend as emergency fallback
+    }
   }
 
+  ensureDataDir();
   fs.writeFileSync(FILES[collection], JSON.stringify(data, null, 2));
 }
 
