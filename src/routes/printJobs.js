@@ -17,7 +17,9 @@ const { log } = require('../lib/logger');
 const router = express.Router();
 
 // ─── Forward URL (Inspectionapp at the shop) ────────────────────────
-const FORWARD_URL = process.env.FORWARD_URL || '';   // e.g. https://api.autoflopro.com
+const FORWARD_URL   = process.env.FORWARD_URL || '';   // e.g. https://api.autoflopro.com
+const CF_CLIENT_ID  = process.env.CF_ACCESS_CLIENT_ID || '';
+const CF_CLIENT_SEC = process.env.CF_ACCESS_CLIENT_SECRET || '';
 
 // ─── Forward a job to the shop's Inspectionapp server ───────────────
 // Fire-and-forget — if it fails we still have the local copy.
@@ -33,9 +35,15 @@ async function forwardToShopServer(job) {
       paperSize:    job.paperSize,
       locationId:   job.locationId
     };
+    const headers = { 'Content-Type': 'application/json' };
+    // Cloudflare Access service-token auth (if tunnel is protected)
+    if (CF_CLIENT_ID && CF_CLIENT_SEC) {
+      headers['CF-Access-Client-Id']     = CF_CLIENT_ID;
+      headers['CF-Access-Client-Secret'] = CF_CLIENT_SEC;
+    }
     const resp = await fetch(`${FORWARD_URL}/api/print/jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
     if (!resp.ok) {
@@ -60,7 +68,13 @@ async function syncRemoteStatuses() {
     const pending = jobs.filter(j => j.remoteId && !['completed', 'failed'].includes(j.status));
     if (pending.length === 0) return;
 
-    const resp = await fetch(`${FORWARD_URL}/api/print/jobs`);
+    const fetchHeaders = {};
+    if (CF_CLIENT_ID && CF_CLIENT_SEC) {
+      fetchHeaders['CF-Access-Client-Id']     = CF_CLIENT_ID;
+      fetchHeaders['CF-Access-Client-Secret'] = CF_CLIENT_SEC;
+    }
+
+    const resp = await fetch(`${FORWARD_URL}/api/print/jobs`, { headers: fetchHeaders });
     if (!resp.ok) return;
     const remoteJobs = await resp.json();
 

@@ -33,7 +33,7 @@ execSync('npm ci --omit=dev', { cwd: path.resolve(COMPUTE), stdio: 'inherit' });
 // ─── Create entrypoint that starts the Express server ──────────────
 // Amplify WEB_COMPUTE injects env vars during BUILD but not into
 // the compute runtime.  We bake the relevant ones into the entrypoint.
-const envVars = ['NODE_ENV', 'API_KEY', 'ALLOWED_ORIGINS', 'DYNAMODB_TABLE', 'DYNAMO_ACCESS_KEY', 'DYNAMO_SECRET_KEY', 'DYNAMO_REGION', 'FORWARD_URL'];
+const envVars = ['NODE_ENV', 'API_KEY', 'ALLOWED_ORIGINS', 'DYNAMODB_TABLE', 'DYNAMO_ACCESS_KEY', 'DYNAMO_SECRET_KEY', 'DYNAMO_REGION', 'FORWARD_URL', 'CF_ACCESS_CLIENT_ID', 'CF_ACCESS_CLIENT_SECRET'];
 const envLines = envVars
   .filter(k => process.env[k])
   .map(k => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(process.env[k])};`)
