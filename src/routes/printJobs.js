@@ -19,21 +19,24 @@ const router = express.Router();
 // ─── Create job ─────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {
-  const { templateName, printer, printerName, printerId, copies, pdfData, labelData, paperSize } = req.body;
+  const { templateName, formName, printer, printerName, printerId, copies, pdfData, labelData, paperSize, locationId } = req.body;
 
   if (!pdfData) {
     return res.status(400).json({ error: 'pdfData (base64 PDF) is required' });
   }
 
+  const resolvedName = templateName || formName || 'Unnamed';
   const job = {
     id: uuidv4(),
-    templateName: templateName || 'Unnamed',
+    templateName: resolvedName,
+    formName: resolvedName,        // alias for Print Client compat
     printer: printer || printerName || null,
     printerId: printerId || null,
     copies: copies || 1,
     pdfData,
     labelData: labelData || {},
     paperSize: paperSize || 'Brother-QL800',
+    locationId: locationId || null,
     status: 'pending',
     createdAt: new Date().toISOString(),
     claimedBy: null,
@@ -72,12 +75,24 @@ router.get('/', async (req, res) => {
 // ─── Poll pending jobs (print client calls this) ───────────────────
 
 router.get('/pending', async (req, res) => {
-  const { limit } = req.query;
+  const { limit, locationId } = req.query;
   let jobs = (await read('jobs')).filter(j => j.status === 'pending');
+
+  // Filter by locationId if the print client provides one
+  if (locationId) {
+    jobs = jobs.filter(j => !j.locationId || j.locationId === locationId);
+  }
 
   // Oldest first so they print in order
   jobs.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-  if (limit) jobs = jobs.slice(0, parseInt(limit, 10));
+  const max = parseInt(limit, 10) || 10;
+  jobs = jobs.slice(0, max);
+
+  // Ensure formName alias exists (Print Client compat)
+  jobs = jobs.map(j => ({
+    ...j,
+    formName: j.formName || j.templateName || 'Unnamed'
+  }));
 
   res.json(jobs);
 });
