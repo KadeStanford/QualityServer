@@ -20,32 +20,24 @@ fs.mkdirSync(STATIC,  { recursive: true });
 
 // ─── Ultra-minimal Lambda handler — zero requires ──────────────────
 const handler = `
-exports.handler = async (event, context) => {
-  // Log the full event so we can see what Amplify sends
-  console.log('EVENT:', JSON.stringify(event, null, 2));
-  console.log('CONTEXT:', JSON.stringify({
-    functionName: context.functionName,
-    functionVersion: context.functionVersion,
-    memoryLimitInMB: context.memoryLimitInMB
-  }));
+const http = require('http');
 
-  const body = JSON.stringify({
+const server = http.createServer((req, res) => {
+  console.log('Request:', req.method, req.url);
+  
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
     message: 'QualityServer is alive',
-    event_keys: Object.keys(event),
+    path: req.url,
+    method: req.method,
     timestamp: new Date().toISOString()
-  });
+  }));
+});
 
-  // Try multiple response formats to see which Amplify accepts
-  return {
-    statusCode: 200,
-    headers: {
-      'content-type': 'application/json',
-      'cache-control': 'no-cache'
-    },
-    isBase64Encoded: false,
-    body: body
-  };
-};
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log('QualityServer listening on port ' + PORT);
+});
 `.trimStart();
 
 fs.writeFileSync(path.join(COMPUTE, 'index.js'), handler);
