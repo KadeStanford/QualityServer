@@ -1,15 +1,11 @@
 #!/usr/bin/env node
 // ─── Amplify WEB_COMPUTE build script ──────────────────────────────
-// Creates the .amplify-hosting/ directory that Amplify expects:
-//   .amplify-hosting/
-//     deploy-manifest.json
-//     compute/default/   ← Lambda handler + app code + node_modules
-//     static/            ← empty (pure API, no static files)
+// Phase 1: MINIMAL — raw Lambda handler, zero dependencies
+// Once this returns 200 from Amplify we add Express back.
 // ────────────────────────────────────────────────────────────────────
 
 const fs   = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const BASE    = '.amplify-hosting';
 const COMPUTE = path.join(BASE, 'compute', 'default');
@@ -22,42 +18,24 @@ if (fs.existsSync(BASE)) fs.rmSync(BASE, { recursive: true });
 fs.mkdirSync(COMPUTE, { recursive: true });
 fs.mkdirSync(STATIC,  { recursive: true });
 
-// ─── Copy application code ─────────────────────────────────────────
-copyDir('src', path.join(COMPUTE, 'src'));
-fs.copyFileSync('package.json',      path.join(COMPUTE, 'package.json'));
-fs.copyFileSync('package-lock.json', path.join(COMPUTE, 'package-lock.json'));
-
-// ─── Install production deps inside compute dir ────────────────────
-console.log('Installing production dependencies…');
-execSync('npm ci --omit=dev', { cwd: path.resolve(COMPUTE), stdio: 'inherit' });
-
-// ─── Create Lambda entry point ─────────────────────────────────────
+// ─── Ultra-minimal Lambda handler — zero requires ──────────────────
 const handler = `
-const serverless = require('serverless-http');
-let wrapped;
-try {
-  const app = require('./src/index');
-  wrapped = serverless(app);
-} catch (err) {
-  console.error('FATAL: Failed to load app:', err);
-  wrapped = async () => ({
-    statusCode: 500,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ error: 'App failed to load', detail: err.message, stack: err.stack })
-  });
-}
-
-module.exports.handler = async (event, context) => {
-  try {
-    return await wrapped(event, context);
-  } catch (err) {
-    console.error('Handler error:', err);
-    return {
-      statusCode: 500,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ error: 'Internal server error', detail: err.message })
-    };
-  }
+exports.handler = async (event, context) => {
+  const response = {
+    statusCode: 200,
+    headers: {
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      message: 'QualityServer is alive',
+      path: event.rawPath || event.path || '/',
+      method: event.requestContext && event.requestContext.http
+        ? event.requestContext.http.method
+        : event.httpMethod || 'UNKNOWN',
+      timestamp: new Date().toISOString()
+    })
+  };
+  return response;
 };
 `.trimStart();
 
@@ -80,15 +58,6 @@ fs.writeFileSync(
   JSON.stringify(manifest, null, 2)
 );
 
-console.log('✔ Build complete → .amplify-hosting/');
-
-// ─── Helper ────────────────────────────────────────────────────────
-function copyDir(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(s, d);
-    else fs.copyFileSync(s, d);
-  }
-}
+console.log('Build complete → .amplify-hosting/');
+console.log('Handler:', path.join(COMPUTE, 'index.js'));
+console.log('Manifest:', path.join(BASE, 'deploy-manifest.json'));
