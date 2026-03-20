@@ -13,6 +13,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { read, write } = require('../lib/store');
 const { log } = require('../lib/logger');
+const { sendPendingSignal } = require('../lib/rtdb-signal');
 
 const router = express.Router();
 
@@ -50,6 +51,9 @@ router.post('/', async (req, res) => {
   const jobs = await read('jobs');
   jobs.push(job);
   await write('jobs', jobs);
+
+  // Wake up Print Client instantly via RTDB
+  sendPendingSignal(job.id);
 
   log(`Print job created: ${job.id} — ${job.templateName} → ${job.printer || 'any'}`);
   res.status(201).json({ id: job.id, status: 'pending', message: 'Print job queued' });

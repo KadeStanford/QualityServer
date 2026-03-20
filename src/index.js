@@ -14,6 +14,7 @@ const printerRoutes      = require('./routes/printers');
 const clientRoutes       = require('./routes/clients');
 const { log }            = require('./lib/logger');
 const { ensureDataDir }  = require('./lib/store');
+const { initFirebase }   = require('./lib/rtdb-signal');
 
 // ─── Load .env for local dev only ──────────────────────────────────
 const envPath = path.join(__dirname, '..', '.env');
@@ -185,6 +186,9 @@ app.use((err, _req, res, _next) => {
 
 // ─── Init data dir ─────────────────────────────────────────────────
 try { ensureDataDir(); } catch (e) { log(`ensureDataDir warning: ${e.message}`); }
+
+// ─── Init Firebase RTDB for instant print signals ──────────────────
+initFirebase();
 
 // ─── Start server ──────────────────────────────────────────────────
 app.listen(PORT, () => {

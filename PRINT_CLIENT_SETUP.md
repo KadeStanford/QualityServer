@@ -1,92 +1,57 @@
 # Print Client → QualityServer Setup
 
-The existing Print Client Electron app at the shop needs **two config changes** to start polling QualityServer instead of the old Inspectionapp.
+The print processor (`print-processor.py`) runs on the shop Mac. It uses a
+**Firebase Realtime Database listener** for instant wake-up when a print job
+is queued, with a periodic safety-net poll as backup.
+
+**No new packages, no config files, no environment variables to set.**
+It uses the same `requests` library that was already installed.
 
 ---
 
-## Step 1: Set the Auth Token
+## Updating the Shop Mac
 
-On the shop Mac, open **Terminal** and run:
+### Only one thing needs to happen:
+
+**Replace `print-processor.py` with the new version from this repo.**
+
+That's it. The new version automatically connects to Firebase RTDB via
+REST streaming (SSE) — no SDK, no credentials, no setup. It uses the
+same `requests` library that was already installed.
+
+If the processor is currently running, stop it (`Ctrl+C` or kill the
+process) and start it again:
 
 ```bash
-# Find where the Print Client writes .auth_token (usually its working directory)
-# The token is the same API key QualityServer uses
-echo "ql-print-2024" > ~/.auth_token
-
-# Also write it where the app might look (its bundle directory)
-APP_DIR="$(find /Applications -name 'Print Client.app' -maxdepth 1 2>/dev/null | head -1)"
-if [ -n "$APP_DIR" ]; then
-  echo "ql-print-2024" > "$APP_DIR/Contents/Resources/app.asar.unpacked/.auth_token"
-fi
+python3 print-processor.py
 ```
 
-**Or** do it through the Print Client UI:
-1. Open the Print Client dashboard (http://localhost:7010)
-2. Go to the **Settings** tab
-3. Paste `ql-print-2024` into the **Auth Token** field
-4. Click Save
+Look for this line in the output:
 
----
-
-## Step 2: Set the Server URL
-
-**Option A — Through the Print Client UI** (easiest):
-1. Open http://localhost:7010 in a browser
-2. Go to **Settings** → **Server Configuration**
-3. Set **Server URL** to: `https://main.d28unxcojzjqgm.amplifyapp.com`
-4. Click **Save** → the app sets `USE_DYNAMIC_IP: false` automatically
-
-**Option B — Edit the config file directly**:
-
-```bash
-CONFIG_DIR="$HOME/Library/Application Support/Print Client"
-mkdir -p "$CONFIG_DIR"
-
-cat > "$CONFIG_DIR/print_client_config.json" << 'EOF'
-{
-  "PRINT_SERVER": "https://main.d28unxcojzjqgm.amplifyapp.com",
-  "USE_DYNAMIC_IP": false,
-  "CLIENT_NAME": "Shop-Mac",
-  "POLL_INTERVAL": 5,
-  "VERIFY_SSL": true
-}
-EOF
+```
+Listening for print jobs via Firebase RTDB (instant)
+Safety-net poll every 60s
 ```
 
----
-
-## Step 3: Restart the Print Client
-
-Quit and relaunch the Print Client app. It will:
-1. Connect to QualityServer using the auth token
-2. Register its printers
-3. Start polling `GET /api/print/jobs/pending` every 5 seconds
-4. Claim → decode base64 PDF → print via CUPS → mark complete
-
----
-
-## Step 4: Enable Auto-Approval (recommended for labels)
-
-By default the Print Client shows a preview and waits for user approval before printing. For labels, you probably want auto-print:
-
-1. Open http://localhost:7010
-2. Find the **Auto-Approval** toggle  
-3. Enable it — jobs will print automatically as they arrive
+That confirms it's working. Prints will now trigger in ~200ms instead of
+waiting up to 5 seconds.
 
 ---
 
 ## How It Works
 
 ```
-QL_Test Dashboard                   QualityServer (AWS)              Print Client (Shop Mac)
+QL_Test Dashboard                  Firebase Cloud Function           Print Processor (Shop Mac)
      │                                     │                                │
      │ POST /api/print/jobs               │                                │
      │ {pdfData, templateName, printer}   │                                │
      │ ──────────────────────────────────>│                                │
-     │                                     │ stores as "pending"           │
+     │                                     │ 1. stores job in Firestore    │
+     │                                     │ 2. writes RTDB signal ──────>│ ⚡ INSTANT
+     │                                     │    printers/pendingSignal     │ (SSE stream)
      │                                     │                                │
      │                                     │   GET /api/print/jobs/pending │
-     │                                     │<────────────────────────────── │ (every 5s)
+     │                                     │<────────────────────────────── │ (triggered immediately)
      │                                     │ → [{id, pdfData, ...}]        │
      │                                     │ ──────────────────────────────>│
      │                                     │                                │
@@ -104,17 +69,95 @@ QL_Test Dashboard                   QualityServer (AWS)              Print Clien
      │                                     │ status → "completed"          │
 ```
 
+**Key difference from old setup:** The print processor no longer polls every
+5 seconds. Firebase pushes a wake-up signal the instant a job is created.
+A safety-net poll every 60 seconds ensures nothing is ever missed.
+
+---
+
+## Initial Setup (first time only)
+
+If this is the first time setting up the print processor:
+
+### 1. Install Python + requests
+
+```bash
+pip3 install requests
+```
+
+### 2. Copy `print-processor.py` to the Mac
+
+Place it somewhere convenient, e.g. `~/print-client/print-processor.py`
+
+### 3. Set environment variables (optional — defaults work out of the box)
+
+The defaults point to the Firebase Cloud Function. Only set these if you
+need to override:
+
+```bash
+export PRINT_SERVER_URL="https://us-central1-qualityexpress-c19f2.cloudfunctions.net/printApi"
+export PRINT_API_KEY="ql-print-2024"
+export CLIENT_ID="shop-mac-processor"
+```
+
+### 4. Run it
+
+```bash
+python3 ~/print-client/print-processor.py
+```
+
 ---
 
 ## Verification
 
-After setup, check the Print Client dashboard at http://localhost:7010:
+1. Start `print-processor.py` and confirm "RTDB listener" messages in the log
+2. Send a test print from the QL_Test dashboard
+3. The processor log should show `>>> RTDB wake-up signal received` within ~200ms
+4. The job should claim, print, and complete almost instantly
 
-- **Connection status** should show "Connected" to QualityServer
-- **Polling** should show "Active"
-- Send a test print from the QL_Test dashboard — it should appear in the Print Client's queue within 5 seconds
+---
 
-From the QL_Test dashboard, the **Print Jobs** tab shows real-time status of all jobs.
+## Running as a Background Service (Optional)
+
+To keep the processor running after logout, create a LaunchAgent:
+
+```bash
+cat > ~/Library/LaunchAgents/com.qualitylube.print-processor.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.qualitylube.print-processor</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/YOUR_USERNAME/print-client/print-processor.py</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PRINT_SERVER_URL</key>
+        <string>https://us-central1-qualityexpress-c19f2.cloudfunctions.net/printApi</string>
+        <key>PRINT_API_KEY</key>
+        <string>ql-print-2024</string>
+        <key>CLIENT_ID</key>
+        <string>shop-mac-processor</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/print-processor.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/print-processor.log</string>
+</dict>
+</plist>
+EOF
+
+# Replace YOUR_USERNAME, then load:
+launchctl load ~/Library/LaunchAgents/com.qualitylube.print-processor.plist
+```
 
 ---
 
@@ -122,8 +165,9 @@ From the QL_Test dashboard, the **Print Jobs** tab shows real-time status of all
 
 | Issue | Fix |
 |-------|-----|
-| "Authentication failed" | Check `.auth_token` contains `ql-print-2024` |
-| "Connection timed out" | Verify Mac has internet access; try `curl -H "X-API-Key: ql-print-2024" https://main.d28unxcojzjqgm.amplifyapp.com/health` |
-| Jobs stay pending | Print Client not running or not polling; check http://localhost:7010 |
-| "CORS error" | Print Client uses Python `requests`, not a browser — CORS shouldn't apply. If using browser, check Allowed Origins |
-| Printer not found | Run `lpstat -a` on the Mac to verify CUPS sees the Brother QL-800 |
+| "Authentication failed" | Check PRINT_API_KEY is `ql-print-2024` |
+| "Connection timed out" | Verify internet; try `curl -H "X-API-Key: ql-print-2024" https://us-central1-qualityexpress-c19f2.cloudfunctions.net/printApi/health` |
+| Jobs stay pending | Processor not running; check Terminal output |
+| "SSE: connection lost" | Normal on network blips; it auto-reconnects. Safety-net poll covers the gap. |
+| Printer not found | Run `lpstat -a` to verify CUPS sees the Brother QL-800 |
+| "RTDB stream not connected" | Check internet. Processor still works via polling — prints just take up to 60s instead of instant. |
